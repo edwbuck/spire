@@ -375,7 +375,11 @@ func (ds *Plugin) createOrReturnRegistrationEntry(ctx context.Context,
 			return nil
 		}
 		registrationEntry, err = createRegistrationEntry(tx, entry)
-		return err
+		if err != nil {
+			return err
+		}
+
+		return createEvent(tx, registrationEntry.EntryId)
 	}); err != nil {
 		return nil, false, err
 	}
@@ -401,8 +405,7 @@ func (ds *Plugin) CountRegistrationEntries(ctx context.Context) (count int32, er
 }
 
 // ListRegistrationEntries lists all registrations (pagination available)
-func (ds *Plugin) ListRegistrationEntries(ctx context.Context,
-	req *datastore.ListRegistrationEntriesRequest) (resp *datastore.ListRegistrationEntriesResponse, err error) {
+func (ds *Plugin) ListRegistrationEntries(ctx context.Context, req *datastore.ListRegistrationEntriesRequest) (resp *datastore.ListRegistrationEntriesResponse, err error) {
 	if req.DataConsistency == datastore.TolerateStale && ds.roDb != nil {
 		return listRegistrationEntries(ctx, ds.roDb, ds.log, req)
 	}
@@ -413,7 +416,10 @@ func (ds *Plugin) ListRegistrationEntries(ctx context.Context,
 func (ds *Plugin) UpdateRegistrationEntry(ctx context.Context, e *common.RegistrationEntry, mask *common.RegistrationEntryMask) (entry *common.RegistrationEntry, err error) {
 	if err = ds.withReadModifyWriteTx(ctx, func(tx *gorm.DB) (err error) {
 		entry, err = updateRegistrationEntry(tx, e, mask)
-		return err
+		if err != nil {
+			return err
+		}
+		return createEvent(tx, entry.EntryId)
 	}); err != nil {
 		return nil, err
 	}
@@ -425,7 +431,10 @@ func (ds *Plugin) DeleteRegistrationEntry(ctx context.Context,
 	entryID string) (registrationEntry *common.RegistrationEntry, err error) {
 	if err = ds.withWriteTx(ctx, func(tx *gorm.DB) (err error) {
 		registrationEntry, err = deleteRegistrationEntry(tx, entryID)
-		return err
+		if err != nil {
+			return err
+		}
+		return createEvent(tx, entryID)
 	}); err != nil {
 		return nil, err
 	}
@@ -437,6 +446,26 @@ func (ds *Plugin) DeleteRegistrationEntry(ctx context.Context,
 func (ds *Plugin) PruneRegistrationEntries(ctx context.Context, expiresBefore time.Time) (err error) {
 	return ds.withWriteTx(ctx, func(tx *gorm.DB) (err error) {
 		err = pruneRegistrationEntries(tx, expiresBefore, ds.log)
+		return err
+	})
+}
+
+// ListRegistrationEntries lists all registrations (pagination available)
+func (ds *Plugin) ListEvents(ctx context.Context, req *datastore.ListEventsRequest) (resp *datastore.ListEventsResponse, err error) {
+	if err = ds.withReadTx(ctx, func(tx *gorm.DB) (err error) {
+		resp, err = listEvents(tx, req)
+		return err
+	}); err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+
+// PruneEvents takes a registration entry message, and deletes all entries which have expired
+// before the date in the message
+func (ds *Plugin) PruneEvents(ctx context.Context, olderThan time.Duration) (err error) {
+	return ds.withWriteTx(ctx, func(tx *gorm.DB) (err error) {
+		err = pruneEvents(tx, olderThan)
 		return err
 	})
 }
@@ -2085,6 +2114,19 @@ func createRegistrationEntry(tx *gorm.DB, entry *common.RegistrationEntry) (*com
 	return registrationEntry, nil
 }
 
+func createEvent(tx *gorm.DB, entryID string) error {
+	newEvent := Event{
+		EntryID: entryID,
+	}
+
+	if err := tx.Create(&newEvent).Error; err != nil {
+		fmt.Println("Error creating event")
+		return sqlError.Wrap(err)
+	}
+
+	return nil
+}
+
 func fetchRegistrationEntry(ctx context.Context, db *sqlDB, entryID string) (*common.RegistrationEntry, error) {
 	query, args, err := buildFetchRegistrationEntryQuery(db.databaseType, db.supportsCTE, entryID)
 	if err != nil {
@@ -2420,6 +2462,60 @@ func listRegistrationEntries(ctx context.Context, db *sqlDB, log logrus.FieldLog
 
 		req.Pagination = resp.Pagination
 	}
+}
+
+func listEvents(tx *gorm.DB, req *datastore.ListEventsRequest) (*datastore.ListEventsResponse, error) {
+	if req.Pagination != nil && req.Pagination.PageSize == 0 {
+		return nil, status.Error(codes.InvalidArgument, "cannot paginate with pagesize = 0")
+	}
+
+	p := req.Pagination
+	var err error
+	if p != nil {
+		tx, err = applyPagination(p, tx)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	var events []Event
+	if err := tx.Find(&events, "id > ?", req.LastID).Error; err != nil {
+		return nil, sqlError.Wrap(err)
+	}
+
+	if p != nil {
+		p.Token = ""
+		// Set token only if page size is the same as federationRelationships len
+		if len(events) > 0 {
+			lastEntry := events[len(events)-1]
+			p.Token = fmt.Sprint(lastEntry.ID)
+		}
+	}
+
+	resp := &datastore.ListEventsResponse{
+		Pagination: p,
+	}
+	for _, model := range events {
+		resp.EntryIDs = append(resp.EntryIDs, model.EntryID)
+	}
+
+	return resp, nil
+}
+
+func pruneEvents(tx *gorm.DB, olderThan time.Duration) error {
+	var events []Event
+	if err := tx.Where("created_at < DATE_SUB(NOW(), INTERVAL ? SECOND)", olderThan.Seconds()).Find(&events).Error; err != nil {
+		return err
+	}
+
+	for _, event := range events {
+		event := event
+		if err := tx.Delete(&event).Error; err != nil {
+			return sqlError.Wrap(err)
+		}
+	}
+
+	return nil
 }
 
 func filterEntriesBySelectorSet(entries []*common.RegistrationEntry, selectors []*common.Selector) []*common.RegistrationEntry {

@@ -162,6 +162,18 @@ func (FederatedTrustDomain) TableName() string {
 	return "federated_trust_domains"
 }
 
+// RegisteredEntry holds a registered entity entry
+type Event struct {
+	Model
+
+	EntryID string
+}
+
+// TableName gets table name for DNS entries
+func (Event) TableName() string {
+	return "events"
+}
+
 // Migration holds database schema version number, and
 // the SPIRE Code version number
 type Migration struct {

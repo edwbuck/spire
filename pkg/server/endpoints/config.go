@@ -73,6 +73,9 @@ type Config struct {
 	// CacheReloadInterval controls how often the in-memory entry cache reloads
 	CacheReloadInterval time.Duration
 
+	// CachePruneEventsInterval controls how often the events table is pruned
+	CachePruneEventsInterval time.Duration
+
 	AuditLogEnabled bool
 
 	// AdminIDs are a list of fixed IDs that when presented by a caller in an

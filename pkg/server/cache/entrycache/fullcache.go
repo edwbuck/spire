@@ -6,6 +6,9 @@ import (
 
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
 	"github.com/spiffe/spire-api-sdk/proto/spire/api/types"
+	"github.com/spiffe/spire/pkg/server/api"
+	"github.com/spiffe/spire/pkg/server/datastore"
+	"github.com/spiffe/spire/proto/spire/common"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -29,6 +32,7 @@ var _ Cache = (*FullEntryCache)(nil)
 // at a particular moment in time.
 type Cache interface {
 	GetAuthorizedEntries(agentID spiffeid.ID) []*types.Entry
+	GetAllEntries() []*types.Entry
 }
 
 // Selector is a key-value attribute of a node or workload.
@@ -88,8 +92,9 @@ type Agent struct {
 }
 
 type FullEntryCache struct {
-	aliases map[spiffeID][]aliasEntry
-	entries map[spiffeID][]*types.Entry
+	aliases     map[spiffeID][]aliasEntry
+	entries     map[spiffeID][]*types.Entry
+	lastEventID uint
 }
 
 type selectorSet map[Selector]struct{}
@@ -173,12 +178,53 @@ func Build(ctx context.Context, entryIter EntryIterator, agentIter AgentIterator
 	}, nil
 }
 
+func Update(ctx context.Context, ds datastore.DataStore, cache *FullEntryCache) error {
+	req := &datastore.ListEventsRequest{
+		LastID: cache.lastEventID,
+	}
+	resp, err := ds.ListEvents(ctx, req)
+	if err != nil {
+		return err
+	}
+
+	for _, entryID := range resp.EntryIDs {
+		commonEntry, err := ds.FetchRegistrationEntry(ctx, entryID)
+		if err != nil {
+			return err
+		}
+
+		if commonEntry == nil {
+			cache.deleteEntry(entryID)
+			cache.lastEventID++
+			continue
+		}
+
+		if err := cache.createOrUpdateEntry(commonEntry); err != nil {
+			return err
+		}
+
+		cache.lastEventID++
+	}
+
+	return nil
+}
+
 // GetAuthorizedEntries gets all authorized registration entries for a given Agent SPIFFE ID.
 func (c *FullEntryCache) GetAuthorizedEntries(agentID spiffeid.ID) []*types.Entry {
 	seen := allocSeenSet()
 	defer freeSeenSet(seen)
 
 	return cloneEntries(c.getAuthorizedEntries(spiffeIDFromID(agentID), seen))
+}
+
+// GetAllEntries gets all registration entries
+func (c *FullEntryCache) GetAllEntries() []*types.Entry {
+	var entries []*types.Entry
+	for _, entry := range c.entries {
+		entries = append(entries, entry...)
+	}
+
+	return entries
 }
 
 func (c *FullEntryCache) getAuthorizedEntries(id spiffeID, seen map[spiffeID]struct{}) []*types.Entry {
@@ -206,6 +252,43 @@ func (c *FullEntryCache) crawl(parentID spiffeID, seen map[spiffeID]struct{}) []
 		entries = append(entries, c.crawl(spiffeIDFromProto(entry.SpiffeId), seen)...)
 	}
 	return entries
+}
+
+func (c *FullEntryCache) createOrUpdateEntry(commonEntry *common.RegistrationEntry) error {
+	protoEntry, err := api.RegistrationEntryToProto(commonEntry)
+	if err != nil {
+		return err
+	}
+
+	parentID := spiffeIDFromProto(protoEntry.ParentId)
+	cacheEntries := c.entries[parentID]
+
+	var i int
+	for i = 0; i < len(cacheEntries); i++ {
+		if cacheEntries[i].Id == protoEntry.Id {
+			cacheEntries[i] = protoEntry
+			break
+		}
+	}
+	if i == len(cacheEntries) {
+		cacheEntries = append(cacheEntries, protoEntry)
+	}
+
+	c.entries[parentID] = cacheEntries
+
+	return nil
+}
+
+func (c *FullEntryCache) deleteEntry(entryID string) {
+	for parentID, cacheEntries := range c.entries {
+		for i := 0; i < len(cacheEntries); i++ {
+			if cacheEntries[i].Id == entryID {
+				cacheEntries = append(cacheEntries[:i], cacheEntries[i+1:]...)
+				c.entries[parentID] = cacheEntries
+				return
+			}
+		}
+	}
 }
 
 func spiffeIDFromID(id spiffeid.ID) spiffeID {

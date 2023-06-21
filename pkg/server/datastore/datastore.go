@@ -65,6 +65,10 @@ type DataStore interface {
 	ListFederationRelationships(context.Context, *ListFederationRelationshipsRequest) (*ListFederationRelationshipsResponse, error)
 	DeleteFederationRelationship(context.Context, spiffeid.TrustDomain) error
 	UpdateFederationRelationship(context.Context, *FederationRelationship, *types.FederationRelationshipMask) (*FederationRelationship, error)
+
+	// Events
+	ListEvents(context.Context, *ListEventsRequest) (*ListEventsResponse, error)
+	PruneEvents(ctx context.Context, olderThan time.Duration) error
 }
 
 // DataConsistency indicates the required data consistency for a read operation.
@@ -207,4 +211,15 @@ type FederationRelationship struct {
 
 	// Fields only used for 'https_spiffe' bundle endpoint profile
 	EndpointSPIFFEID spiffeid.ID
+}
+
+type ListEventsRequest struct {
+	Pagination *Pagination
+	LastID     uint
+}
+
+type ListEventsResponse struct {
+	EntryIDs     []string
+	FirstEventID uint
+	Pagination   *Pagination
 }
