@@ -27,8 +27,8 @@ type AuthorizedEntryFetcherWithFullCache struct {
 	log                      logrus.FieldLogger
 	mu                       sync.RWMutex
 	dataStore                datastore.DataStore
-	cacheReloadInterval      time.Duration
-	cachePruneEventsInterval time.Duration
+	entryCacheUpdateInterval time.Duration
+	entryEventsPruneInterval time.Duration
 }
 
 func NewAuthorizedEntryFetcherWithFullCache(ctx context.Context, buildCache entryCacheBuilderFn, updateCache entryCacheUpdateFn, c Config) (*AuthorizedEntryFetcherWithFullCache, error) {
@@ -45,8 +45,8 @@ func NewAuthorizedEntryFetcherWithFullCache(ctx context.Context, buildCache entr
 		clk:                      c.Clock,
 		log:                      c.Log,
 		dataStore:                c.Catalog.GetDataStore(),
-		cacheReloadInterval:      c.CacheReloadInterval,
-		cachePruneEventsInterval: c.CachePruneEventsInterval,
+		entryCacheUpdateInterval: c.EntryCacheUpdateInterval,
+		entryEventsPruneInterval: c.EntryEventsPruneInterval,
 	}, nil
 }
 
@@ -60,8 +60,8 @@ func (a *AuthorizedEntryFetcherWithFullCache) FetchAllCachedEntries() ([]*types.
 	return a.cache.GetAllEntries(), nil
 }
 
-// RunRebuildCacheTask starts a ticker which rebuilds the in-memory entry cache.
-func (a *AuthorizedEntryFetcherWithFullCache) RunRebuildCacheTask(ctx context.Context) error {
+// RunUpdateCacheTask starts a ticker which updates the in-memory entry cache.
+func (a *AuthorizedEntryFetcherWithFullCache) EntryCacheUpdateTask(ctx context.Context) error {
 	rebuild := func() {
 		a.mu.Lock()
 		defer a.mu.Unlock()
@@ -84,29 +84,29 @@ func (a *AuthorizedEntryFetcherWithFullCache) RunRebuildCacheTask(ctx context.Co
 		case <-ctx.Done():
 			a.log.Debug("Stopping in-memory entry cache hydrator")
 			return nil
-		case <-a.clk.After(a.cacheReloadInterval):
+		case <-a.clk.After(a.entryCacheUpdateInterval):
 			rebuild()
 		}
 	}
 }
 
-func (a *AuthorizedEntryFetcherWithFullCache) RunPruneEventsTask(ctx context.Context) error {
+func (a *AuthorizedEntryFetcherWithFullCache) EntryEventsPruneTask(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
 			a.log.Debug("Stopping event pruner")
 			return nil
-		case <-a.clk.After(a.cachePruneEventsInterval):
+		case <-a.clk.After(a.entryEventsPruneInterval):
 			a.log.Info("Pruning events")
-			if err := a.pruneEvents(ctx); err != nil {
+			if err := a.pruneEntryEvents(ctx); err != nil {
 				a.log.WithError(err).Error("Failed to prune events")
 			}
 		}
 	}
 }
 
-func (a *AuthorizedEntryFetcherWithFullCache) pruneEvents(ctx context.Context) error {
-	return a.dataStore.PruneEvents(ctx, a.cachePruneEventsInterval)
+func (a *AuthorizedEntryFetcherWithFullCache) pruneEntryEvents(ctx context.Context) error {
+	return a.dataStore.PruneEntryEvents(ctx, a.entryEventsPruneInterval)
 
 }
 

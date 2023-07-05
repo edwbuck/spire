@@ -31,6 +31,14 @@ func (sef *staticEntryCache) GetAuthorizedEntries(agentID spiffeid.ID) []*types.
 	return sef.entries[agentID]
 }
 
+func (sef *staticEntryCache) GetAllEntries() []*types.Entry {
+        var entries []*types.Entry
+        for _, entry := range sef.entries {
+                entries = append(entries, entry...)
+        }
+        return entries
+}
+
 func newStaticEntryCache(entries map[spiffeid.ID][]*types.Entry) *staticEntryCache {
 	return &staticEntryCache{
 		entries: entries,
@@ -39,14 +47,24 @@ func newStaticEntryCache(entries map[spiffeid.ID][]*types.Entry) *staticEntryCac
 
 func TestNewAuthorizedEntryFetcherWithFullCache(t *testing.T) {
 	ctx := context.Background()
+
 	log, _ := test.NewNullLogger()
-	clk := clock.NewMock(t)
+	config := Config{
+		Log: log,
+		Clock: clock.NewMock(t),
+		EntryCacheUpdateInterval: 1 * time.Minute,
+                EntryEventsPruneInterval: 10 * time.Minute,
+	}
 	entries := make(map[spiffeid.ID][]*types.Entry)
 	buildCache := func(context.Context) (entrycache.Cache, error) {
 		return newStaticEntryCache(entries), nil
 	}
 
-	ef, err := NewAuthorizedEntryFetcherWithFullCache(ctx, buildCache, log, clk, defaultCacheReloadInterval)
+	updateCache := func(context.Context, entrycache.Cache(staticEntryCache)) (error) {
+		return nil
+	}
+
+	ef, err := NewAuthorizedEntryFetcherWithFullCache(ctx, buildCache, updateCache, config)
 	assert.NoError(t, err)
 	assert.NotNil(t, ef)
 }

@@ -186,7 +186,16 @@ func TestListenAndServe(t *testing.T) {
 		return entrycache.BuildFromDataStore(ctx, ds)
 	}
 
-	ef, err := NewAuthorizedEntryFetcherWithFullCache(context.Background(), buildCacheFn, log, clk, defaultCacheReloadInterval)
+	config := Config{
+		EntryCacheUpdateInterval: 1 * time.Minute,
+		EntryEventsPruneInterval: 10 * time.Minute,
+	}
+
+	updateCacheFn := func(ctx context.Context, cache entrycache.Cache) (err error) {
+		return entrycache.Update(ctx, ds, cache.(*entrycache.FullEntryCache))
+	}
+
+	ef, err := NewAuthorizedEntryFetcherWithFullCache(context.Background(), buildCacheFn, updateCacheFn, config)
 	require.NoError(t, err)
 
 	pe, err := authpolicy.DefaultAuthPolicy(ctx)
@@ -212,7 +221,8 @@ func TestListenAndServe(t *testing.T) {
 		Log:                          log,
 		Metrics:                      metrics,
 		RateLimit:                    rateLimit,
-		EntryFetcherCacheRebuildTask: ef.RunRebuildCacheTask,
+		EntryCacheUpdateTask:         ef.EntryCacheUpdateTask,
+		EntryEventsPruneTask:         ef.EntryEventsPruneTask,
 		AuthPolicyEngine:             pe,
 		AdminIDs:                     []spiffeid.ID{foreignAdminSVID.ID},
 	}

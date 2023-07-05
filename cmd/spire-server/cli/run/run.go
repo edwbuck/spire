@@ -97,7 +97,8 @@ type serverConfig struct {
 
 type experimentalConfig struct {
 	AuthOpaPolicyEngine *authpolicy.OpaEngineConfig `hcl:"auth_opa_policy_engine"`
-	CacheReloadInterval string                      `hcl:"cache_reload_interval"`
+	EntryCacheUpdateInterval string                 `hcl:"entry_cache_reload_interval"`
+	EntryEventsPurgeInterval string                 `hcl:"entry_events_purge_interval"`
 
 	Flags fflag.RawConfig `hcl:"feature_flags"`
 
@@ -607,12 +608,20 @@ func NewServerConfig(c *Config, logOptions []log.Option, allowUnknownConfig bool
 		sc.Log.Warn("Experimental features have been enabled. Please see doc/upgrading.md for upgrade and compatibility considerations for experimental features.")
 	}
 
-	if c.Server.Experimental.CacheReloadInterval != "" {
-		interval, err := time.ParseDuration(c.Server.Experimental.CacheReloadInterval)
+	if c.Server.Experimental.EntryCacheUpdateInterval != "" {
+		entryCacheUpdateInterval, err := time.ParseDuration(c.Server.Experimental.EntryCacheUpdateInterval)
 		if err != nil {
-			return nil, fmt.Errorf("could not parse cache reload interval: %w", err)
+			return nil, fmt.Errorf("could not parse entry cache reload interval: %w", err)
 		}
-		sc.CacheReloadInterval = interval
+		sc.EntryCacheUpdateInterval = entryCacheUpdateInterval
+	}
+
+	if c.Server.Experimental.EntryEventsPurgeInterval != "" {
+		entryEventsPurgeInterval, err := time.ParseDuration(c.Server.Experimental.EntryEventsPurgeInterval)
+		if err != nil {
+			return nil, fmt.Errorf("could not parse entry events purge interval: %w", err)
+		}
+		sc.EntryEventsPurgeInterval = entryEventsPurgeInterval
 	}
 
 	sc.AuthOpaPolicyEngineConfig = c.Server.Experimental.AuthOpaPolicyEngine

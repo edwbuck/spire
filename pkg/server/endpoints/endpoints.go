@@ -43,13 +43,13 @@ const (
 	// route to the server in the case of a change in DNS membership.
 	defaultMaxConnectionAge = 3 * time.Minute
 
-	// This is the default amount of time between two reloads of the in-memory
+	// This is the default amount of time between two updates of the in-memory
 	// entry cache.
-	defaultCacheReloadInterval = 5 * time.Second
+	defaultEntryCacheUpdateInterval = 5 * time.Second
 
 	// This is the default amount of time between two reloads of the in-memory
 	// entry cache.
-	defaultCachePruneEventsInterval = 20 * time.Second
+	defaultEntryEventsPruneInterval = 20 * time.Second
 )
 
 // Server manages gRPC and HTTP endpoint lifecycle
@@ -73,8 +73,8 @@ type Endpoints struct {
 	Log                          logrus.FieldLogger
 	Metrics                      telemetry.Metrics
 	RateLimit                    RateLimitConfig
-	EntryFetcherCacheRebuildTask func(context.Context) error
-	EntryFetcherPruneEventsTask  func(context.Context) error
+	EntryCacheUpdateTask         func(context.Context) error
+	EntryEventsPruneTask         func(context.Context) error
 	AuditLogEnabled              bool
 	AuthPolicyEngine             *authpolicy.Engine
 	AdminIDs                     []spiffeid.ID
@@ -121,11 +121,11 @@ func New(ctx context.Context, c Config) (*Endpoints, error) {
 		return entrycache.Update(ctx, c.Catalog.GetDataStore(), cache.(*entrycache.FullEntryCache))
 	}
 
-	if c.CacheReloadInterval == 0 {
-		c.CacheReloadInterval = defaultCacheReloadInterval
+	if c.EntryCacheUpdateInterval == 0 {
+		c.EntryCacheUpdateInterval = defaultEntryCacheUpdateInterval
 	}
-	if c.CachePruneEventsInterval == 0 {
-		c.CachePruneEventsInterval = defaultCachePruneEventsInterval
+	if c.EntryEventsPruneInterval == 0 {
+		c.EntryEventsPruneInterval = defaultEntryEventsPruneInterval
 	}
 
 	ef, err := NewAuthorizedEntryFetcherWithFullCache(ctx, buildCacheFn, updateCacheFn, c)
@@ -147,8 +147,8 @@ func New(ctx context.Context, c Config) (*Endpoints, error) {
 		Log:                          c.Log,
 		Metrics:                      c.Metrics,
 		RateLimit:                    c.RateLimit,
-		EntryFetcherCacheRebuildTask: ef.RunRebuildCacheTask,
-		EntryFetcherPruneEventsTask:  ef.RunPruneEventsTask,
+		EntryCacheUpdateTask:         ef.EntryCacheUpdateTask,
+		EntryEventsPruneTask:         ef.EntryEventsPruneTask,
 		AuditLogEnabled:              c.AuditLogEnabled,
 		AuthPolicyEngine:             c.AuthPolicyEngine,
 		AdminIDs:                     c.AdminIDs,
@@ -189,8 +189,8 @@ func (e *Endpoints) ListenAndServe(ctx context.Context) error {
 		func(ctx context.Context) error {
 			return e.runLocalAccess(ctx, udsServer)
 		},
-		e.EntryFetcherCacheRebuildTask,
-		e.EntryFetcherPruneEventsTask,
+		e.EntryCacheUpdateTask,
+		e.EntryEventsPruneTask,
 	}
 
 	if e.BundleEndpointServer != nil {
