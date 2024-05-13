@@ -4,7 +4,9 @@ import (
 	"context"
 	"crypto/x509/pkix"
 	"net"
+	"sync"
 	"time"
+	"fmt"
 
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
 	common "github.com/spiffe/spire/pkg/common/catalog"
@@ -18,7 +20,24 @@ import (
 	"github.com/spiffe/spire/pkg/server/plugin/keymanager"
 )
 
+type ConfigListener interface {
+	// this method is contraversial, but it would primarly
+	// exist to externalize the code that would be within
+	// ConfigChanged to validate new configurations could be
+	// used prior to using them.
+	CheckConfig(config *Config) error
+
+	// The command to use the new configuration.
+	ConfigChanged(config *Config) error
+}
+
 type Config struct {
+	// lock for consistent fine grained updates of the Config.
+	mu sync.Mutex
+
+	// the listeners for configuration changes.
+	listeners []ConfigListener
+
 	// Configurations for server plugins
 	PluginConfigs common.PluginConfigs
 
@@ -126,8 +145,58 @@ type FederationConfig struct {
 	FederatesWith map[spiffeid.TrustDomain]bundle_client.TrustDomainConfig
 }
 
+
 func New(config Config) *Server {
+	config.listeners = make([]ConfigListener, 0, 0)
 	return &Server{
-		config: config,
+		config: &config,
 	}
 }
+
+func (c *Config) AddListener(listener ConfigListener) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.listeners = append(c.listeners, listener)
+	return nil
+}
+
+func (c *Config) RemoveListener(listener ConfigListener) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	foundIndex := -1
+	for index, candidate := range c.listeners {
+		if candidate == listener {
+			foundIndex = index
+			break
+		}
+	}
+	if foundIndex == -1 {
+		return fmt.Errorf("ConfigListener %T: %p cannot be removed as a listener to %+v, it is already not listening", listener, listener, c)
+	}
+	c.listeners = append(c.listeners[:foundIndex], c.listeners[foundIndex+1:]...)
+	return nil
+}
+
+
+func (c *Config) checkConfig(proposed *Config) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, listener := range c.listeners {
+		if err := listener.CheckConfig(proposed); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (c *Config) fireConfigChanged() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, listener := range c.listeners {
+		if err := listener.ConfigChanged(c); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+

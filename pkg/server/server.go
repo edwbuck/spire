@@ -54,13 +54,31 @@ const (
 )
 
 type Server struct {
-	config Config
+	config *Config
+}
+
+func (s *Server) CheckConfig(newConfig *Config) error {
+	s.config.Log.WithFields(logrus.Fields{"module": "server",}).Info("Checking New Config")
+	s.config.Log.WithFields(logrus.Fields{"module": "server",}).Info("Checking config.dataDir")
+	if s.config.DataDir != newConfig.DataDir {
+		return fmt.Errorf("Server doesn't support changes of dataDir (oldValue = %s, newValue = %s", s.config.DataDir, newConfig.DataDir)
+	}
+	return nil
+}
+
+func (s *Server) ConfigChanged(newConfig *Config) error {
+	s.config.Log.WithFields(logrus.Fields{"module": "server",}).Info("Applying New Config")
+	return nil
 }
 
 // Run the server
 // This method initializes the server, including its plugins,
 // and then blocks until it's shut down or an error is encountered.
 func (s *Server) Run(ctx context.Context) error {
+	s.config.AddListener(s)
+	s.CheckConfig(s.config)
+	s.ConfigChanged(s.config)
+	
 	if err := s.run(ctx); err != nil {
 		s.config.Log.WithError(err).Error("Fatal run error")
 		return err
