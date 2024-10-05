@@ -1,0 +1,35 @@
+$ go test -run NONE -v -benchmem -benchtime=10000x -bench .
+goos: darwin
+goarch: arm64
+pkg: github.com/spiffe/spire/pkg/server/endpoints
+cpu: Apple M2 Max
+BenchmarkEventTrackerCurrent
+    eventtracker_bench_test.go:85:     eventCount              : 46
+    eventtracker_bench_test.go:86:     pollsPerInterval(50th)  : 46.00 (1.00)
+    eventtracker_bench_test.go:87:     pollsPerInterval(95th)  : 46.00 (1.00)
+    eventtracker_bench_test.go:88:     pollsPerInterval(99th)  : 46.00 (1.00)
+    eventtracker_bench_test.go:85:     eventCount              : 460000
+    eventtracker_bench_test.go:86:     pollsPerInterval(50th)  : 21144.00 (0.05)
+    eventtracker_bench_test.go:87:     pollsPerInterval(95th)  : 38468.00 (0.08)
+    eventtracker_bench_test.go:88:     pollsPerInterval(99th)  : 39567.00 (0.09)
+BenchmarkEventTrackerCurrent-12                    10000           7813680 ns/op            5588 B/op         48 allocs/op
+BenchmarkEventTrackerPriorityQueue
+    eventtracker_bench_test.go:85:     eventCount              : 46
+    eventtracker_bench_test.go:86:     pollsPerInterval(50th)  : 27.00 (0.59)
+    eventtracker_bench_test.go:87:     pollsPerInterval(95th)  : 27.00 (0.59)
+    eventtracker_bench_test.go:88:     pollsPerInterval(99th)  : 27.00 (0.59)
+    eventtracker_bench_test.go:85:     eventCount              : 460000
+    eventtracker_bench_test.go:86:     pollsPerInterval(50th)  : 20110.00 (0.04)
+    eventtracker_bench_test.go:87:     pollsPerInterval(95th)  : 36021.00 (0.08)
+    eventtracker_bench_test.go:88:     pollsPerInterval(99th)  : 37750.00 (0.08)
+BenchmarkEventTrackerPriorityQueue-12              10000          13887751 ns/op            5027 B/op         47 allocs/op
+PASS
+
+The difference in pollsPerInterval is explained by the deterministic hashing of the current approach and the jitter mechanism in the priority queue.
+
+Even though the CPU cost is 2x, it's still a difference of ~7ms that will be spent over a 5s interval.
+
+The memory usage is not drastically different (low dozen's of MBs)
+You can run the above with -memprofile to get a memory profile dump that you can view with `go tool pprof`.
+
+Note that this branch fixes the "current" implementation to use a sync pool to manage the slice returned from SelectEvents, which is not yet present in the official PR branch.

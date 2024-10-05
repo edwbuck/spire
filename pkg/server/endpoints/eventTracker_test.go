@@ -1113,3 +1113,20 @@ func TestBoundaryBuilder(t *testing.T) {
 		})
 	}
 }
+
+func TestPollsOverTime(t *testing.T) {
+	pollTime := 5 * time.Second
+	trackTime := 24 * time.Hour
+
+	pollPeriods := endpoints.PollPeriods(pollTime, trackTime)
+	pollBoundaries := endpoints.BoundaryBuilder(pollTime, trackTime)
+	eventTracker := endpoints.NewEventTracker(pollPeriods, pollBoundaries)
+	for i := uint(0); i < 240_000; i += 2 {
+		eventTracker.StartTracking(i + 1)
+	}
+
+	// Observe how many are polled each period for the first two minutes.
+	for elapsed := time.Duration(0); elapsed < 5*time.Minute; elapsed += pollTime {
+		t.Logf("elapsed %s: %d\n", elapsed, len(eventTracker.SelectEvents()))
+	}
+}
