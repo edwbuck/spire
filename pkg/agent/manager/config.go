@@ -38,7 +38,8 @@ type Config struct {
 	UseSyncAuthorizedEntries bool
 	RotationInterval         time.Duration
 	SVIDStoreCache           *storecache.Cache
-	SVIDCacheMaxSize         int
+	X509SVIDCacheMaxSize     int
+	JWTSVIDCacheMaxSize      int
 	DisableLRUCache          bool
 	NodeAttestor             nodeattestor.NodeAttestor
 	RotationStrategy         *rotationutil.RotationStrategy
@@ -65,15 +66,8 @@ func newManager(c *Config) *manager {
 		c.Clk = clock.New()
 	}
 
-	var cache Cache
-	if c.DisableLRUCache {
-		cache = managerCache.New(c.Log.WithField(telemetry.SubsystemName, telemetry.CacheManager), c.TrustDomain, c.Bundle,
-			c.Metrics)
-	} else {
-		// use LRU cache implementation
-		cache = managerCache.NewLRUCache(c.Log.WithField(telemetry.SubsystemName, telemetry.CacheManager), c.TrustDomain, c.Bundle,
-			c.Metrics, c.SVIDCacheMaxSize, c.Clk)
-	}
+	cache := managerCache.NewLRUCache(c.Log.WithField(telemetry.SubsystemName, telemetry.CacheManager), c.TrustDomain, c.Bundle,
+		c.Metrics, c.X509SVIDCacheMaxSize, c.JWTSVIDCacheMaxSize, c.Clk)
 
 	rotCfg := &svid.RotatorConfig{
 		SVIDKeyManager:   keymanager.ForSVID(c.Catalog.GetKeyManager()),
@@ -101,6 +95,9 @@ func newManager(c *Config) *manager {
 		client:         client,
 		clk:            c.Clk,
 		svidStoreCache: c.SVIDStoreCache,
+
+		processedTaintedX509Authorities: make(map[string]struct{}),
+		processedTaintedJWTAuthorities:  make(map[string]struct{}),
 	}
 
 	return m

@@ -256,7 +256,7 @@ func (p *Plugin) Configure(ctx context.Context, req *configv1.ConfigureRequest) 
 	p.setCache(keyEntries)
 	p.kmsClient = kc
 
-	// Cancel previous tasks in case of re configure.
+	// Cancel previous tasks in case of re-configure.
 	if p.cancelTasks != nil {
 		p.cancelTasks()
 	}
@@ -605,7 +605,7 @@ func (p *Plugin) disposeCryptoKeys(ctx context.Context) error {
 	return nil
 }
 
-// disposeCryptoKeysTask will be run every 24hs.
+// disposeCryptoKeysTask will be run every 24hr.
 // It will schedule the destruction of CryptoKeyVersions that have a
 // spire-last-update label value older than two weeks.
 // It will only schedule the destruction of CryptoKeyVersions belonging to the
@@ -873,7 +873,7 @@ func (p *Plugin) notifyKeepActiveCryptoKeys(err error) {
 	}
 }
 
-// scheduleDestroyTask is a long running task that schedules the destruction
+// scheduleDestroyTask is a long-running task that schedules the destruction
 // of inactive CryptoKeyVersions and sets the corresponding CryptoKey as inactive.
 func (p *Plugin) scheduleDestroyTask(ctx context.Context) {
 	backoffMin := 1 * time.Second

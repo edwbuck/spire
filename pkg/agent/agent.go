@@ -32,6 +32,7 @@ import (
 	"github.com/spiffe/spire/pkg/common/telemetry"
 	"github.com/spiffe/spire/pkg/common/uptime"
 	"github.com/spiffe/spire/pkg/common/util"
+	"github.com/spiffe/spire/pkg/common/version"
 	_ "golang.org/x/net/trace" // registers handlers on the DefaultServeMux
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -51,7 +52,10 @@ type Agent struct {
 // This method initializes the agent, including its plugins,
 // and then blocks on the main event loop.
 func (a *Agent) Run(ctx context.Context) error {
-	a.c.Log.Infof("Starting agent with data directory: %q", a.c.DataDir)
+	a.c.Log.WithFields(logrus.Fields{
+		telemetry.DataDir: a.c.DataDir,
+		telemetry.Version: version.Version(),
+	}).Info("Starting agent")
 	if err := diskutil.CreateDataDirectory(a.c.DataDir); err != nil {
 		return err
 	}
@@ -142,7 +146,7 @@ func (a *Agent) Run(ctx context.Context) error {
 		}
 	}
 
-	svidStoreCache := a.newSVIDStoreCache()
+	svidStoreCache := a.newSVIDStoreCache(metrics)
 
 	manager, err := a.newManager(ctx, sto, cat, metrics, as, svidStoreCache, nodeAttestor)
 	if err != nil {
@@ -275,8 +279,8 @@ func (a *Agent) newManager(ctx context.Context, sto storage.Storage, cat catalog
 		Storage:                  sto,
 		SyncInterval:             a.c.SyncInterval,
 		UseSyncAuthorizedEntries: a.c.UseSyncAuthorizedEntries,
-		SVIDCacheMaxSize:         a.c.X509SVIDCacheMaxSize,
-		DisableLRUCache:          a.c.DisableLRUCache,
+		X509SVIDCacheMaxSize:     a.c.X509SVIDCacheMaxSize,
+		JWTSVIDCacheMaxSize:      a.c.JWTSVIDCacheMaxSize,
 		SVIDStoreCache:           cache,
 		NodeAttestor:             na,
 		RotationStrategy:         rotationutil.NewRotationStrategy(a.c.AvailabilityTarget),
@@ -326,10 +330,11 @@ func (a *Agent) newManager(ctx context.Context, sto storage.Storage, cat catalog
 	}
 }
 
-func (a *Agent) newSVIDStoreCache() *storecache.Cache {
+func (a *Agent) newSVIDStoreCache(metrics telemetry.Metrics) *storecache.Cache {
 	config := &storecache.Config{
 		Log:         a.c.Log.WithField(telemetry.SubsystemName, "svid_store_cache"),
 		TrustDomain: a.c.TrustDomain,
+		Metrics:     metrics,
 	}
 
 	return storecache.New(config)

@@ -900,25 +900,7 @@ func TestNewAgentConfig(t *testing.T) {
 		{
 			msg: "x509_svid_cache_max_size is set",
 			input: func(c *Config) {
-				c.Agent.Experimental.X509SVIDCacheMaxSize = 100
-			},
-			logOptions: func(t *testing.T) []log.Option {
-				return []log.Option{
-					func(logger *log.Logger) error {
-						logger.SetOutput(io.Discard)
-						hook := test.NewLocal(logger.Logger)
-						t.Cleanup(func() {
-							spiretest.AssertLogsContainEntries(t, hook.AllEntries(), []spiretest.LogEntry{
-								{
-									Level: logrus.WarnLevel,
-									Message: "The `x509_svid_cache_max_size` and `disable_lru_cache` " +
-										"configurations are deprecated. They will be removed in a future release.",
-								},
-							})
-						})
-						return nil
-					},
-				}
+				c.Agent.X509SVIDCacheMaxSize = 100
 			},
 			test: func(t *testing.T, c *agent.Config) {
 				require.EqualValues(t, 100, c.X509SVIDCacheMaxSize)
@@ -935,7 +917,7 @@ func TestNewAgentConfig(t *testing.T) {
 		{
 			msg: "x509_svid_cache_max_size is zero",
 			input: func(c *Config) {
-				c.Agent.Experimental.X509SVIDCacheMaxSize = 0
+				c.Agent.X509SVIDCacheMaxSize = 0
 			},
 			test: func(t *testing.T, c *agent.Config) {
 				require.EqualValues(t, 0, c.X509SVIDCacheMaxSize)
@@ -945,56 +927,10 @@ func TestNewAgentConfig(t *testing.T) {
 			msg:         "x509_svid_cache_max_size is negative",
 			expectError: true,
 			input: func(c *Config) {
-				c.Agent.Experimental.X509SVIDCacheMaxSize = -10
+				c.Agent.X509SVIDCacheMaxSize = -10
 			},
 			test: func(t *testing.T, c *agent.Config) {
 				require.Nil(t, c)
-			},
-		},
-		{
-			msg: "disable_lru_cache is set",
-			input: func(c *Config) {
-				c.Agent.Experimental.DisableLRUCache = true
-			},
-			logOptions: func(t *testing.T) []log.Option {
-				return []log.Option{
-					func(logger *log.Logger) error {
-						logger.SetOutput(io.Discard)
-						hook := test.NewLocal(logger.Logger)
-						t.Cleanup(func() {
-							spiretest.AssertLogsContainEntries(t, hook.AllEntries(), []spiretest.LogEntry{
-								{
-									Level: logrus.WarnLevel,
-									Message: "The `x509_svid_cache_max_size` and `disable_lru_cache` " +
-										"configurations are deprecated. They will be removed in a future release.",
-								},
-							})
-						})
-						return nil
-					},
-				}
-			},
-			test: func(t *testing.T, c *agent.Config) {
-				require.True(t, c.DisableLRUCache)
-			},
-		},
-		{
-			msg:         "both disable_lru_cache and x509_svid_cache_max_size are set",
-			expectError: true,
-			input: func(c *Config) {
-				c.Agent.Experimental.DisableLRUCache = true
-				c.Agent.Experimental.X509SVIDCacheMaxSize = 100
-			},
-			test: func(t *testing.T, c *agent.Config) {
-				require.Nil(t, c)
-			},
-		},
-		{
-			msg: "disable_lru_cache is not set",
-			input: func(c *Config) {
-			},
-			test: func(t *testing.T, c *agent.Config) {
-				require.False(t, c.DisableLRUCache)
 			},
 		},
 		{

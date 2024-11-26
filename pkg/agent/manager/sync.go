@@ -4,17 +4,22 @@ import (
 	"context"
 	"crypto"
 	"crypto/x509"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/sirupsen/logrus"
+	"github.com/spiffe/go-spiffe/v2/bundle/spiffebundle"
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
 	"github.com/spiffe/spire/pkg/agent/client"
 	"github.com/spiffe/spire/pkg/agent/manager/cache"
 	"github.com/spiffe/spire/pkg/agent/workloadkey"
 	"github.com/spiffe/spire/pkg/common/bundleutil"
 	"github.com/spiffe/spire/pkg/common/telemetry"
+	"github.com/spiffe/spire/pkg/common/telemetry/agent"
 	telemetry_agent "github.com/spiffe/spire/pkg/common/telemetry/agent"
 	"github.com/spiffe/spire/pkg/common/util"
+	"github.com/spiffe/spire/pkg/common/x509util"
 	"github.com/spiffe/spire/proto/spire/common"
 )
 
@@ -33,14 +38,63 @@ type SVIDCache interface {
 
 	// GetStaleEntries gets a list of records that need update SVIDs
 	GetStaleEntries() []*cache.StaleEntry
+
+	// TaintX509SVIDs marks all SVIDs signed by a tainted X.509 authority as tainted
+	// to force their rotation.
+	TaintX509SVIDs(ctx context.Context, taintedX509Authorities []*x509.Certificate)
+
+	// TaintJWTSVIDs removes JWT-SVIDs with tainted authorities from the cache,
+	// forcing the server to issue a new JWT-SVID when one with a tainted
+	// authority is requested.
+	TaintJWTSVIDs(ctx context.Context, taintedJWTAuthorities map[string]struct{})
 }
 
 func (m *manager) syncSVIDs(ctx context.Context) (err error) {
-	// perform syncSVIDs only if using LRU cache
-	if m.c.SVIDCacheMaxSize > 0 {
-		m.cache.SyncSVIDsWithSubscribers()
-		return m.updateSVIDs(ctx, m.c.Log.WithField(telemetry.CacheType, "workload"), m.cache)
+	m.cache.SyncSVIDsWithSubscribers()
+	return m.updateSVIDs(ctx, m.c.Log.WithField(telemetry.CacheType, "workload"), m.cache)
+}
+
+// processTaintedAuthorities verifies if a new authority is tainted and forces rotation in all caches if required.
+func (m *manager) processTaintedAuthorities(ctx context.Context, bundle *spiffebundle.Bundle, x509Authorities []string, jwtAuthorities map[string]struct{}) error {
+	newTaintedX509Authorities := getNewItemsFromSlice(m.processedTaintedX509Authorities, x509Authorities)
+	if len(newTaintedX509Authorities) > 0 {
+		m.c.Log.WithField(telemetry.SubjectKeyIDs, strings.Join(newTaintedX509Authorities, ",")).
+			Debug("New tainted X.509 authorities found")
+
+		taintedX509Authorities, err := bundleutil.FindX509Authorities(bundle, newTaintedX509Authorities)
+		if err != nil {
+			return fmt.Errorf("failed to search X.509 authorities: %w", err)
+		}
+
+		// Taint all regular X.509 SVIDs
+		m.cache.TaintX509SVIDs(ctx, taintedX509Authorities)
+
+		// Taint all SVIDStore SVIDs
+		m.svidStoreCache.TaintX509SVIDs(ctx, taintedX509Authorities)
+
+		// Notify rotator about new tainted authorities
+		if err := m.svid.NotifyTaintedAuthorities(taintedX509Authorities); err != nil {
+			return err
+		}
+
+		for _, subjectKeyID := range newTaintedX509Authorities {
+			m.processedTaintedX509Authorities[subjectKeyID] = struct{}{}
+		}
 	}
+
+	newTaintedJWTAuthorities := getNewItemsFromMap(m.processedTaintedJWTAuthorities, jwtAuthorities)
+	if len(newTaintedJWTAuthorities) > 0 {
+		m.c.Log.WithField(telemetry.JWTAuthorityKeyIDs, strings.Join(newTaintedJWTAuthorities, ",")).
+			Debug("New tainted JWT authorities found")
+
+		// Taint JWT-SVIDs in the cache
+		m.cache.TaintJWTSVIDs(ctx, jwtAuthorities)
+
+		for _, subjectKeyID := range newTaintedJWTAuthorities {
+			m.processedTaintedJWTAuthorities[subjectKeyID] = struct{}{}
+		}
+	}
+
 	return nil
 }
 
@@ -52,11 +106,16 @@ func (m *manager) synchronize(ctx context.Context) (err error) {
 		return err
 	}
 
-	if err := m.updateCache(ctx, cacheUpdate, m.c.Log.WithField(telemetry.CacheType, "workload"), "", m.cache); err != nil {
+	// Process all tainted authorities. The bundle is shared between both caches using regular cache data.
+	if err := m.processTaintedAuthorities(ctx, cacheUpdate.Bundles[m.c.TrustDomain], cacheUpdate.TaintedX509Authorities, cacheUpdate.TaintedJWTAuthorities); err != nil {
 		return err
 	}
 
-	if err := m.updateCache(ctx, storeUpdate, m.c.Log.WithField(telemetry.CacheType, "svid_store"), "svid_store", m.svidStoreCache); err != nil {
+	if err := m.updateCache(ctx, cacheUpdate, m.c.Log.WithField(telemetry.CacheType, agent.CacheTypeWorkload), "", m.cache); err != nil {
+		return err
+	}
+
+	if err := m.updateCache(ctx, storeUpdate, m.c.Log.WithField(telemetry.CacheType, agent.CacheTypeSVIDStore), agent.CacheTypeSVIDStore, m.svidStoreCache); err != nil {
 		return err
 	}
 
@@ -258,6 +317,27 @@ func (m *manager) fetchEntries(ctx context.Context) (_ *cache.UpdateEntries, _ *
 		return nil, nil, err
 	}
 
+	// Get all Subject Key IDs and KeyIDs of tainted authorities
+	var taintedX509Authorities []string
+	taintedJWTAuthorities := make(map[string]struct{})
+	if b, ok := update.Bundles[m.c.TrustDomain.IDString()]; ok {
+		for _, rootCA := range b.RootCas {
+			if rootCA.TaintedKey {
+				cert, err := x509.ParseCertificate(rootCA.DerBytes)
+				if err != nil {
+					return nil, nil, fmt.Errorf("failed to parse tainted x509 authority: %w", err)
+				}
+				subjectKeyID := x509util.SubjectKeyIDToString(cert.SubjectKeyId)
+				taintedX509Authorities = append(taintedX509Authorities, subjectKeyID)
+			}
+		}
+		for _, jwtKey := range b.JwtSigningKeys {
+			if jwtKey.TaintedKey {
+				taintedJWTAuthorities[jwtKey.Kid] = struct{}{}
+			}
+		}
+	}
+
 	cacheEntries := make(map[string]*common.RegistrationEntry)
 	storeEntries := make(map[string]*common.RegistrationEntry)
 
@@ -271,11 +351,15 @@ func (m *manager) fetchEntries(ctx context.Context) (_ *cache.UpdateEntries, _ *
 	}
 
 	return &cache.UpdateEntries{
-			Bundles:             bundles,
-			RegistrationEntries: cacheEntries,
+			Bundles:                bundles,
+			RegistrationEntries:    cacheEntries,
+			TaintedJWTAuthorities:  taintedJWTAuthorities,
+			TaintedX509Authorities: taintedX509Authorities,
 		}, &cache.UpdateEntries{
-			Bundles:             bundles,
-			RegistrationEntries: storeEntries,
+			Bundles:                bundles,
+			RegistrationEntries:    storeEntries,
+			TaintedJWTAuthorities:  taintedJWTAuthorities,
+			TaintedX509Authorities: taintedX509Authorities,
 		}, nil
 }
 
@@ -306,4 +390,26 @@ func parseBundles(bundles map[string]*common.Bundle) (map[spiffeid.TrustDomain]*
 		out[td] = bundle
 	}
 	return out, nil
+}
+
+func getNewItemsFromSlice(current map[string]struct{}, items []string) []string {
+	var newItems []string
+	for _, subjectKeyID := range items {
+		if _, ok := current[subjectKeyID]; !ok {
+			newItems = append(newItems, subjectKeyID)
+		}
+	}
+
+	return newItems
+}
+
+func getNewItemsFromMap(current map[string]struct{}, items map[string]struct{}) []string {
+	var newItems []string
+	for subjectKeyID := range items {
+		if _, ok := current[subjectKeyID]; !ok {
+			newItems = append(newItems, subjectKeyID)
+		}
+	}
+
+	return newItems
 }

@@ -49,7 +49,9 @@ func (r *Rotator) Interval() time.Duration {
 }
 
 func (r *Rotator) triggerTaintedReceived(tainted bool) {
-	r.taintedReceived <- tainted
+	if r.taintedReceived != nil {
+		r.taintedReceived <- tainted
+	}
 }
 
 // Run starts a ticker which monitors the server SVID
@@ -58,8 +60,8 @@ func (r *Rotator) Run(ctx context.Context) error {
 	t := r.c.Clock.Ticker(r.c.Interval)
 	defer t.Stop()
 
-	bundeVerificationTicker := r.c.Clock.Ticker(defaultBundleVerificationTicker)
-	defer bundeVerificationTicker.Stop()
+	bundleVerificationTicker := r.c.Clock.Ticker(defaultBundleVerificationTicker)
+	defer bundleVerificationTicker.Stop()
 
 	for {
 		select {
@@ -83,7 +85,7 @@ func (r *Rotator) Run(ctx context.Context) error {
 	}
 }
 
-// shouldRotate returns a boolean informing the caller of whether or not the
+// shouldRotate returns a boolean informing the caller of whether the
 // SVID should be rotated.
 func (r *Rotator) shouldRotate() bool {
 	s := r.state.Value().(State)

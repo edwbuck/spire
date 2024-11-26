@@ -64,7 +64,11 @@ func buildConfig(coreConfig catalog.CoreConfig, hclText string, status *pluginco
 
 	var dnsPatterns []*regexp.Regexp
 	for _, r := range hclConfig.AllowedDNSPatterns {
-		re := regexp.MustCompile(r)
+		re, err := regexp.Compile(r)
+		if err != nil {
+			status.ReportErrorf("cannot compile allowed_dns_pattern: %q, %s", r, err)
+			continue
+		}
 		dnsPatterns = append(dnsPatterns, re)
 	}
 
@@ -185,7 +189,7 @@ func (p *Plugin) Attest(stream nodeattestorv1.NodeAttestor_AttestServer) error {
 		return err
 	}
 
-	// receive the response. We dont really care what it is but the plugin system requiries it.
+	// receive the response. We don't really care what it is but the plugin system requires it.
 	_, err = stream.Recv()
 	if err != nil {
 		return err

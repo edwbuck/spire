@@ -1340,6 +1340,7 @@ func TestTaintX509Authority(t *testing.T) {
 			expectResp: &localauthorityv1.TaintX509AuthorityResponse{
 				TaintedAuthority: &localauthorityv1.AuthorityState{
 					AuthorityId: nextAuthorityID,
+					ExpiresAt:   notAfterNext.Unix(),
 				},
 			},
 			expectLogs: []spiretest.LogEntry{
@@ -1607,7 +1608,7 @@ func TestTaintX509Authority(t *testing.T) {
 
 func TestTaintX509UpstreamAuthority(t *testing.T) {
 	getUpstreamCertAndSubjectID := func(ca *testca.CA) (*x509.Certificate, string) {
-		// Self signed CA will return itself
+		// Self-signed CA will return itself
 		cert := ca.X509Authorities()[0]
 		return cert, x509util.SubjectKeyIDToString(cert.SubjectKeyId)
 	}
@@ -1654,7 +1655,9 @@ func TestTaintX509UpstreamAuthority(t *testing.T) {
 			currentSlot:         createSlotWithUpstream(journal.Status_ACTIVE, currentIntermediateCA, notAfterCurrent),
 			nextSlot:            createSlotWithUpstream(journal.Status_OLD, oldIntermediateCA, notAfterNext),
 			subjectKeyIDToTaint: deactivatedUpstreamAuthorityID,
-			expectResp:          &localauthorityv1.TaintX509UpstreamAuthorityResponse{},
+			expectResp: &localauthorityv1.TaintX509UpstreamAuthorityResponse{
+				UpstreamAuthoritySubjectKeyId: deactivatedUpstreamAuthorityID,
+			},
 			expectLogs: []spiretest.LogEntry{
 				{
 					Level:   logrus.InfoLevel,
@@ -2155,7 +2158,7 @@ func TestRevokeX509Authority(t *testing.T) {
 
 func TestRevokeX509UpstreamAuthority(t *testing.T) {
 	getUpstreamCertAndSubjectID := func(ca *testca.CA) (*x509.Certificate, string) {
-		// Self signed CA will return itself
+		// Self-signed CA will return itself
 		cert := ca.X509Authorities()[0]
 		return cert, x509util.SubjectKeyIDToString(cert.SubjectKeyId)
 	}
@@ -2193,7 +2196,9 @@ func TestRevokeX509UpstreamAuthority(t *testing.T) {
 			currentSlot:          createSlotWithUpstream(journal.Status_ACTIVE, currentIntermediateCA, notAfterCurrent),
 			nextSlot:             createSlotWithUpstream(journal.Status_OLD, oldIntermediateCA, notAfterNext),
 			subjectKeyIDToRevoke: deactivatedUpstreamAuthorityID,
-			expectResp:           &localauthorityv1.RevokeX509UpstreamAuthorityResponse{},
+			expectResp: &localauthorityv1.RevokeX509UpstreamAuthorityResponse{
+				UpstreamAuthoritySubjectKeyId: deactivatedUpstreamAuthorityID,
+			},
 			expectLogs: []spiretest.LogEntry{
 				{
 					Level:   logrus.InfoLevel,

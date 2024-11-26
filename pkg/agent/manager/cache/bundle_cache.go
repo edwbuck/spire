@@ -2,8 +2,11 @@ package cache
 
 import (
 	"github.com/imkira/go-observer"
+	"github.com/spiffe/go-spiffe/v2/bundle/spiffebundle"
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
 )
+
+type Bundle = spiffebundle.Bundle
 
 type BundleCache struct {
 	trustDomain spiffeid.TrustDomain
@@ -22,7 +25,7 @@ func NewBundleCache(trustDomain spiffeid.TrustDomain, bundle *Bundle) *BundleCac
 
 func (c *BundleCache) Update(bundles map[spiffeid.TrustDomain]*Bundle) {
 	// the bundle map must be copied so that the source can be mutated
-	// afterwards.
+	// afterward.
 	c.bundles.Update(copyBundleMap(bundles))
 }
 
@@ -79,7 +82,7 @@ func (b *BundleStream) WaitNext() map[spiffeid.TrustDomain]*Bundle {
 }
 
 // Clone creates a new independent stream from this one but sharing the same
-// Property. Updates to the property will be reflected in both streams but
+// Property. Updates to the property will be reflected in both streams, but
 // they may have different values depending on when they advance the stream
 // with Next.
 func (b *BundleStream) Clone() *BundleStream {

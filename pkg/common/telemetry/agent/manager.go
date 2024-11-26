@@ -5,6 +5,11 @@ import (
 	"github.com/spiffe/spire/pkg/common/telemetry"
 )
 
+const (
+	CacheTypeWorkload  = "workload"
+	CacheTypeSVIDStore = "svid_store"
+)
+
 // Call Counters (timing and success metrics)
 // Allows adding labels in-code
 
@@ -29,7 +34,7 @@ func StartManagerFetchSVIDsUpdatesCall(m telemetry.Metrics) *telemetry.CallCount
 // AddCacheManagerExpiredSVIDsSample count of expiring SVIDs according to
 // agent cache manager
 func AddCacheManagerExpiredSVIDsSample(m telemetry.Metrics, cacheType string, count float32) {
-	key := []string{telemetry.CacheManager, cacheType, telemetry.ExpiringSVIDs}
+	key := []string{telemetry.CacheManager, telemetry.ExpiringSVIDs}
 	if cacheType != "" {
 		key = append(key, cacheType)
 	}
@@ -40,6 +45,26 @@ func AddCacheManagerExpiredSVIDsSample(m telemetry.Metrics, cacheType string, co
 // according to agent cache manager
 func AddCacheManagerOutdatedSVIDsSample(m telemetry.Metrics, cacheType string, count float32) {
 	key := []string{telemetry.CacheManager, telemetry.OutdatedSVIDs}
+	if cacheType != "" {
+		key = append(key, cacheType)
+	}
+	m.AddSample(key, count)
+}
+
+// AddCacheManagerTaintedX509SVIDsSample count of tainted X509-SVIDs according to
+// agent cache manager
+func AddCacheManagerTaintedX509SVIDsSample(m telemetry.Metrics, cacheType string, count float32) {
+	key := []string{telemetry.CacheManager, telemetry.TaintedX509SVIDs}
+	if cacheType != "" {
+		key = append(key, cacheType)
+	}
+	m.AddSample(key, count)
+}
+
+// AddCacheManagerTaintedJWTSVIDsSample count of tainted JWT-SVIDs according to
+// agent cache manager
+func AddCacheManagerTaintedJWTSVIDsSample(m telemetry.Metrics, cacheType string, count float32) {
+	key := []string{telemetry.CacheManager, telemetry.TaintedJWTSVIDs}
 	if cacheType != "" {
 		key = append(key, cacheType)
 	}
